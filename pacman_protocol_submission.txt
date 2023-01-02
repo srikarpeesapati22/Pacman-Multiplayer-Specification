@@ -1,0 +1,409 @@
+Student Number: 22016432
+Pacman Protocol Specification
+=========================
+Terminology
+==========
+This specification uses the terms MUST, SHOULD, and MAY as defined in RFC 2119 [rfc2119].
+The Pacman protocol runs over TCP, using a well-known port of 9872.
+There are 12 message types: MAZE UPDATE, PACMAN ARRIVED, PACMAN LEFT, PACMAN DIED, PACMAN GO HOME, PACMAN UPDATE, GHOST UPDATE, FOREIGN PACMAN ATE GHOST, EAT, SCORE UPDATE, LIVES UPDATE, STATUS UPDATE.
+The following terminology is used to distinguish between visiting Pacman and various game objects:
+LOCAL: the game object is a local game object, and is currently on the local screen.
+AWAY: Local Pacman is currently away on the remote screen.
+REMOTE: A game object on the remote screen that the AWAY Pacman might interact with.
+FOREIGN: The Pacman when it is visiting the remote screen.
+
+The following terminology is used to differentiate between local game board states.
+• STARTUP
+• CHASE
+• FRIGHTEN
+• GAME OVER
+• NEXT LEVEL WAIT
+• READY TO RESTART
+Gameplay only happens in CHASE and FRIGHTEN state (the difference being whether a powerpill has recently been eaten). The software is in STARTUP state while playing the startup jingle. The other states are explained in a later section. Changes between these states are communicated using “STATUS UPDATE” messages.
+In this document, when these terms are capitalized, they have these specific meanings.
+
+Setting Up the Connection Between Local and Remote Computer
+===========================================================
+
+Both the client and the server open a socket on the respective devices. The server socket listens for incoming connections. The client socket sends a connect request to the server, along with a password. The server socket compares the password sent by the client with the one it already has, and if they match, a connection is established, and the client and server are ready to exchange data.
+
+Exchanging of Current Map
+=========================
+
+At STARTUP or READY TO RESTART, each computer sends the other a copy of its maze. The game ships with three different mazes, though more can be added. As the maze is sent over the network to the other player, it is fine if the mazes stored on each computer are different. The maze that is sent includes the location of all the food and powerpills.
+Constant Actions Message Exchange
+=================================
+
+When Pacman is AWAY, the local model needs to know about everything it can interact with. 
+The model running on each computer keeps two mazes in memory – the LOCAL one and the REMOTE one. To keep the copies of the maze running on each computer synchronized, each computer continuously informs the other of actions. The actions include the Pacman moving (position, direction and speed), the LOCAL ghosts moving, ghosts changing state, eating food or powerpills, ghosts getting eaten, and the player dying.
+
+
+Interactions Between Pacmans, Ghosts, and Food
+==============================================
+
+On receipt of the constant actions messages from the remote computer, the local computer updates the relevant maze - this might be the local maze if the other Pacman is currently FOREIGN, or it might be the remote maze if the other Pacman is REMOTE. Whenever the Pacman’s score changes, whether the Pacman is LOCAL or AWAY, the system sends the remote system a “SCORE UPDATE” message. 
+
+	Pacman Movement Between Screens
+	===============================
+
+When the LOCAL Pacman visits the remote screen, it becomes AWAY. The home computer first sends a “PACMAN ARRIVED” message, so the remote computer can initialise any state. Whenever home Pacman moves, the home computer sends “PACMAN UPDATE” messages to the remote computer, giving the current position, direction and speed of home Pacman. 
+
+If the model detects that the AWAY Pacman has traversed the tunnel again, and is now LOCAL, it sends a “FOREIGN PACMAN LEFT” message. The remote side will stop displaying the Pacman on its main screen (and display it again on the smaller remote screen if enabled). Some events require that the AWAY Pacman be forcibly sent home. This happens, for example, when the level is completed on the remote screen. The remote system sends a “PACMAN GO HOME” message. The system then resets the Pacman to LOCAL, and sends a “FOREIGN PACMAN LEFT” message in reply. 
+
+	Pacmans and Food
+	================
+
+Whenever the LOCAL or AWAY Pacman eats food or powerpills, this is detected by the model running on the computer, using its copy of the LOCAL or REMOTE maze as appropriate. The computer then sends an “EAT” update message to the remote computer informing it that food or a powerpill has been eaten. Thus, even when the Pacman is AWAY, interactions between it and food are still handled by the local model. 
+
+
+	Ghosts and Pacman Death
+	=======================
+
+The home computer also sends “GHOST UPDATE” messages whenever the LOCAL ghosts move. These give the position, direction, speed, and mode of each ghost. When the mode of the ghost is in “FRIGHTEN” mode it is blue and edible, when the mode is “CHASE” Pacman will die if it touches the ghosts. The remote computer also sends such ”GHOST UPDATE” messages to the home computer. 
+The model uses this information to update a local model of the REMOTE ghosts to determine if the Pacman was either killed by a ghost, or has eaten a ghost. If the model detects that the AWAY Pacman has eaten a REMOTE ghost (while it was in FRIGHTEN mode), it sends a “FOREIGN PACMAN ATE GHOST” message to update the remote system. If the model detects that the AWAY Pacman was killed by a REMOTE ghost, it sends a “FOREIGN PACMAN DIED” message. 
+
+
+	Game Over and Restarting
+	========================
+
+If either player loses their last life, the game ends. The losing player’s computer goes to GAME OVER state, and sends a STATUS UPDATE message. The other side then also moves to GAME OVER state.
+From GAME OVER state, if the local player presses “r” to restart, the local computer goes to READY TO RESTART state and sends a STATUS UPDATE message. The game restarts when the second player also presses “r”, and sends a replying “READY TO RESTART” status update. When a level is cleared on a screen, that screen’s system goes to NEXT LEVEL WAIT while it plays the jingle and the player gets ready. Completing a level does not affect the level being played on the other screen, except the Pacman positions are reset.
+Message Contents
+================
+--------MAZE UPDATE--------
+A "MAZE UPDATE" message is sent at the STARTUP or READY TO RESTART stage to render the remote maze on the small screen.
+
+- Contents
+  - Type: MAZE UPDATE
+  - CharacterId: (0 = '/', 1 = '-', 2 = '.', 3 = '*', 4 = '#', 5 = 'A', 6 = 'B', 7 = '\', 8 = '|', 9 = ' ')
+  - PositionX: 0 to 83
+  - PositionY: 0 to 30
+
+
+- Format
+  - Size: 5210 bytes (84 rows * 31 columns = 2604 characters. 
+                      Each character takes 2 bytes to encode, 2604 chars * 2 bytes = 5208 bytes.
+                      The type definition and the unused bits take another 2 bytes to encode.
+                      Total Size = 5208 bytes + 2 bytes = 5210 bytes.)
+  - Encoding:
+    0             1               2
+    0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |  T  |           u           |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |Char0|      PX0    |    PY0  | 
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |Char1|      PX1    |    PY1  |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |Char2|      PX2    |    PY2  |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    ...
+    ...
+    ...
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |CharF|      PXF    |    PYF  |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+- Fields
+  - T: 4 bit type field, type:MAZE UPDATE has a decimal value of 0.
+  - unused: 7 bits in size, not used, but needed to maintain byte alignment. 
+       MUST be set to a value of 0 in this protocol.
+  - Char0: 4 bit type field, since the maximum value of CharacterId is 9 which takes up 4 bits, with an unsigned integer in big-endian byte order. Char1, Char2, ..., CharF are the next characters in the maze, and utilize the same format as Char0.
+  - PX0: 7 bit type field, since the maximum value of PositionX is 83 which takes up 7 bits, with an unsigned integer in big-endian byte order. PX1, PX2, ..., PXF are the next x positions in the maze, and utilize the same format as PX0.
+  - PY0: 5 bit type field, since the maximum value of PositionY is 30 which takes up 5 bits, with an unsigned integer in big-endian byte order. PY1, PY2, ..., PYF are the next characters in the maze, and utilize the same format as PY0.
+
+- Response
+  - The remote computer uses the MAZE UPDATE message to build the remote maze shown in the top-right corner.
+
+- Additional Processing
+  - The way used to draw the maze should be changed to taking the characterId, converting it to the respective
+    character, and plot it in the coordinates given by PositionX and PositionY.
+
+--------PACMAN ARRIVED--------
+A "PACMAN ARRIVED" message is sent when a LOCAL pacman passes through the tunnel and becomes FOREIGN.
+
+- Contents
+  - Type: PACMAN ARRIVED
+
+- Format
+  - Size: 1 byte
+  - Encoding:
+    0             1
+    0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+
+    |  u  |   T   |
+    +-+-+-+-+-+-+-+
+
+- Fields
+  - u: 4 bits in size, not used, but needed to maintain byte alignment. 
+       MUST be set to a value of 0 in this protocol.
+  - T: 4 bit type field, type:PACMAN ARRIVED has a decimal value of 1, with an unsigned integer in big-endian byte order.
+
+
+--------PACMAN LEFT--------
+A "PACMAN LEFT" message is sent when a FOREIGN pacman leaves the tunnel and becomes LOCAL again. A "PACMAN LEFT" message is also sent as acknowledgement to a "PACMAN GO HOME" request.
+
+- Contents
+  - Type: PACMAN LEFT
+
+- Format
+  - Size: 1 byte
+  - Encoding:
+    0             1
+    0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+
+    |  u  |   T   |
+    +-+-+-+-+-+-+-+
+
+- Fields
+  - u: 4 bits in size, not used, but needed to maintain byte alignment. 
+       MUST be set to a value of 0 in this protocol.
+  - T: 4 bit type field, type:PACMAN LEFT has a decimal value of 2, with an unsigned integer in big-endian byte order.
+
+--------PACMAN DIED--------
+A "PACMAN DIED" message is sent when a FOREIGN pacman dies.
+
+- Contents
+  - Type: PACMAN DIED
+
+- Format
+  - Size: 1 byte
+  - Encoding:
+    0             1
+    0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+
+    |  u  |   T   |
+    +-+-+-+-+-+-+-+
+
+- Fields
+  - u: 4 bits in size, not used, but needed to maintain byte alignment. 
+       MUST be set to a value of 0 in this protocol.
+  - T: 4 bit type field, type:PACMAN GO HOME has a decimal value of 3, with an unsigned integer in big-endian byte order.
+
+
+--------PACMAN GO HOME--------
+A "PACMAN GO HOME" message is sent when an AWAY Pacman has to be forcibly sent back home. For example, when the level is complete on the remote screen.
+
+- Contents
+  - Type: PACMAN GO HOME
+
+- Format
+  - Size: 1 byte
+  - Encoding: 
+    0             1
+    0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+
+    |  u  |   T   |
+    +-+-+-+-+-+-+-+
+
+- Fields
+  - u: 4 bits in size, not used, but needed to maintain byte alignment. 
+       MUST be set to a value of 0 in this protocol.
+  - T: 4 bit type field, type:PACMAN GO HOME has a decimal value of 4, with an unsigned integer in big-endian byte order.
+  
+
+- Response
+  - System resets FOREIGN pacman to LOCAL, and then sends a FOREIGN PACMAN LEFT message.
+
+--------PACMAN UPDATE--------
+A "PACMAN UPDATE" is sent constantly (60 times per second) to inform the remote computer of the other computer's pacman position.
+
+- Contents
+  - Type: PACMAN UPDATE
+  - PositionX: 0 to 540
+  - PositionY: 0 to 600
+  - Direction: 0 to 3 (0=Up,1=Left,2=Right,3=Down)
+  - Speed: 0 to 100
+
+- Format
+  - Size: 5 bytes
+  - Encoding:
+    0             1               2               3               4               5
+    0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |  T  |     u       |         PX        |        PY         |Dir|    Speed    |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+- Fields
+  - T: 4 bit type field, type=PACMAN UPDATE has a decimal value of 5.
+  - u: 7 bits in size, not used, but needed to maintain byte alignment. 
+       MUST be set to a value of 0 in this protocol.
+  - PX: 10 bit type field, since the highest value of PositionX is 540, which takes up 10 bits, with an unsigned integer in big-endian byte order.
+  - PY: 10 bit type field, since the highest value of PositionX is 600, which takes up 10 bits, with an unsigned integer in big-endian byte order.
+  - Dir: 2 bit type field, since the highest value of Direction is 3, which takes up 2 bits, with an unsigned integer in big-endian byte order.
+  - Speed: 7 bit type field, since the highest value of Speed is 100, which takes up 7 bits, with an unsigned integer in big-endian byte order.
+
+- Response
+  - Home computer uses PACMAN UPDATE to update copy of Pacman on the remote screen. 
+
+- Additional Processing
+  - Home computer has to divide speed by 100 to get speed of Pacman.
+
+--------GHOST UPDATE--------
+A "GHOST UPDATE" is sent constantly to inform the remote computer of the other computer's ghost position.
+
+- Contents
+  - Type: GHOST UPDATE
+  - Ghost Number: 0 to 3
+  - PositionX: 0 to 540
+  - PositionY: 0 to 600
+  - Direction: 0 to 3 (0=Up,1=Left,2=Right,3=Down)
+  - Speed: 0 to 100
+  - Mode: 0 to 4 (0=SCATTER,1=CHASE,2=FRIGHTEN,3=FRIGHTEN_TRAPPED,4=EYES)
+
+- Format
+  - Size: 5 bytes
+  - Encoding:
+    0             1               2               3               4               5
+    0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |  T  |  u  | GN|       PX          |        PY         |Dir|    Speed    | M |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+- Fields
+  - T: 4 bit type field, type=GHOST UPDATE has a decimal value of 6.
+  - u: 3 bits in size, not used, but needed to maintain byte alignment. 
+       MUST be set to a value of 0 in this protocol.
+  - GN: 2 bit type field, since the highest value of Ghost Number is 3, which takes up 2 bits, with an unsigned integer in big-endian byte order.
+  - PX: 10 bit type field, since the highest value of PositionX is 540, which takes up 10 bits, with an unsigned integer in big-endian byte order.
+  - PY: 10 bit type field, since the highest value of PositionX is 600, which takes up 10 bits, with an unsigned integer in big-endian byte order.
+  - Dir: 2 bit type field, since the highest value of Direction is 3, which takes up 2 bits, with an unsigned integer in big-endian byte order.
+  - Speed: 7 bit type field, since the highest value of Speed is 100, which takes up 7 bits, with an unsigned integer in big-endian byte order.
+  - M: 2 bit type field, since the highest value of Mode is 4, which takes up 2 bits, with an unsigned integer in big-endian byte order.
+
+- Response
+  - Home computer uses GHOST UPDATE to update ghost position on copy of remote screen. 
+
+- Additional Processing
+  - Home computer has to divide speed by 100 to get speed of the ghost.
+
+--------FOREIGN PACMAN ATE GHOST--------
+A "FOREIGN PACMAN ATE GHOST" is sent when a foreign pacman on another screen eats a local ghost.
+
+- Contents
+  - Type: FOREIGN PACMAN ATE GHOST
+  - Ghost Number: 0, 1, 2, or 3
+
+- Format
+  - Size: 1 byte
+  - Encoding:
+    0             1
+    0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+
+    | T   | u |GN |
+    +-+-+-+-+-+-+-+
+
+- Fields
+  - T: 4 bit type field, type=FOREIGN PACMAN ATE GHOST has a decimal value of 7.
+  - u: 2 bits in size, not used, but needed to maintain byte alignment. 
+            MUST be set to a value of 0 in this protocol.
+  - GN: 2 bit type field, since the highest value of Ghost Number is 3, which takes up 2 bits, with an unsigned integer in big-endian byte order.
+
+- Response
+  - Used to update screens, and update score.
+
+--------EAT--------
+A "EAT" message is sent when food or a powerpill is eaten.
+
+- Contents
+  - Type: EAT
+  - Coord1: 0-27
+  - Coord2: 0-30
+  - Is_Foreign: True or False
+  - Is_Powerpill: True or False
+
+- Format
+  - Size: 2 bytes
+  - Encoding:
+    0             1               2
+    0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    | T   | CoordX  | CoordY  |F|P|
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    
+
+- Fields
+  - T: 4 bit type field, type=EAT has a decimal value of 8.
+  - CoordX: 5 bit type field, because 5 bits are required to hold the max value of 27, with an unsigned integer in big-endian byte order.
+  - CoordY: 5 bit type field, because 5 bits are required to hold the max value of 30, with an unsigned integer in big-endian byte order.
+  - F: 1 bit type field, 0 is False, and 1 is True, with an unsigned integer in big-endian byte order.
+  - P: 1 bit type field, 0 is False, and 1 is True, with an unsigned integer in big-endian byte order.
+
+- Response
+  - The food on the remote/local screen is updated.
+
+--------SCORE UPDATE--------
+A “SCORE UPDATE” message is sent constantly to inform the remote computer about the Pacman’s score.
+
+- Contents
+  - Type: SCORE UPDATE
+  - Score: The current score of the local screen’s Pacman.
+
+- Format
+  - Size: 3 bytes
+  - Encoding:
+    0             1               2               3
+    0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |  T  |  unused   |           Score           |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+- Fields
+  - T: 4 bit type field, type=SCORE UPDATE has a decimal value of 9.
+  - unused: 6 bits in size, not used, but needed to maintain byte alignment. 
+            MUST be set to a value of 0 in this protocol. 
+  - Score: 14 bit type field, with an unsigned integer in big-endian byte order.
+           As the highest possible score is 11280 (2^14), 14 bits are used.
+
+- Response
+  - After receiving the SCORE UPDATE message, the receiving computer updates the score of the remote version stored locally.
+
+--------LIVES UPDATE--------
+A "LIVES UPDATE" message is sent after the number of lives the remote Pacman has changes.
+
+- Contents
+  - Type: LIVES UPDATE
+  - Lives: Number of lives the remote Pacman has.
+
+- Format
+  - Size: 1 byte
+  - Encoding:
+    0             1
+    0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+
+    |  T  |u|Lives|
+    +-+-+-+-+-+-+-+
+
+- Fields
+  - T: 4 bit type field, type=LIVES UPDATE has a decimal value of 10.
+  - u: 1 bit in size, not used, but needed to maintain byte alignment.
+       MUST be set to a value of 0 in this protocol.
+  - Lives: 3 bit type field, since maximum number of lives is 5 which requires 3 bits, with an unsigned integer in big-endian byte order.
+
+- Response
+  - After receiving the LIVES UPDATE message, the receiving computer updates the lives of the remote pacman stored locally.
+
+--------STATUS UPDATE--------
+A "STATUS UPDATE" is sent when the state of the game board changes between GAME OVER, NEXT LEVEL WAIT, READY TO RESTART.
+
+- Contents
+  - Type: STATUS UPDATE
+  - Status: GAME OVER, NEXT LEVEL WAIT, READY TO RESTART represented by 0, 1, 2 respectively.
+
+- Format
+  - Size: 1 byte
+  - Encoding:
+    0             1
+    0 1 2 3 4 5 6 7
+    +-+-+-+-+-+-+-+
+    |  T  |u  |St |
+    +-+-+-+-+-+-+-+
+
+- Fields
+  - T: 4 bit type field, type=STATUS UPDATE has a decimal value of 11.
+  - u: 2 bits in size, not used, but needed to maintain byte alignment.
+       MUST be set to a value of 0 in this protocol.
+  - St: 2 bit type field, since maximum value of status is 2 which requires 2 bits, with an unsigned integer in big-endian byte order.
+
+- Response
+  - Depending on the content of the STATUS UPDATE message, the receiving computer updates the remote and/or local maze.
